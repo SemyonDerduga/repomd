@@ -9,7 +9,7 @@ with pathlib.Path('README.md').open() as f:
 
 setuptools.setup(
     name='repomd',
-    version='0.2.1',
+    version='0.2.2',
     author='Carl George',
     author_email='carl@george.computer',
     description='Library for reading dnf/yum repositories',
