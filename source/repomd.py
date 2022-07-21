@@ -1,6 +1,8 @@
 import io
 import os
+import bz2
 import gzip
+import lzma
 import shutil
 import sqlite3
 import pathlib
@@ -214,21 +216,89 @@ class Package:
         return f'<{self.__class__.__name__}: "{self.nevra}">'
 
 
+# Compreddion part
+def uncompress_bz(_source_path, _dest_path):
+    """
+        Uncompress file from bz.
+
+        :param _source_path:        str path to the archive.
+        :param _dest_path:          str path to the uncompressed file.
+    """
+    with bz2.open(_source_path, 'rb') as f_source:
+        with open(_dest_path, 'wb') as f_dest:
+            f_dest.write(f_source.read())
+
+
+def uncompress_gz(_source_path, _dest_path):
+    """
+        Uncompress file from gz.
+
+        :param _source_path:        str path to the archive.
+        :param _dest_path:          str path to the uncompressed file.
+    """
+    with gzip.open(_source_path, "rb") as f_source:
+        with open(_dest_path, "wb") as f_dest:
+            f_dest.write(f_source.read())
+
+
+def uncompress_xz(_source_path, _dest_path):
+    """
+        Uncompress file from xz.
+
+        :param _source_path:        str path to the archive.
+        :param _dest_path:          str path to the uncompressed file.
+    """
+    with lzma.open(_source_path, "rb") as f_source:
+        with open(_dest_path, "wb") as f_dest:
+            f_dest.write(f_source.read())
+
+
+def uncompress(source_path, dest_path, compression_type):
+    """
+        Uncompress archive.
+
+        :param source_path:        str path to the archive.
+        :param dest_path:          str path to the uncompressed file.
+        :param compression_type:   str compression type.
+    """
+
+    uncompress_dict = {
+        'bz2': uncompress_bz,
+        'bz': uncompress_bz,
+        'gz': uncompress_gz,
+        'xz': uncompress_xz
+    }
+
+    uncompress_dict[compression_type](source_path, dest_path)
+
+
 class RepoSQL:
     """A dnf/yum repository."""
 
-    __slots__ = ['baseurl', '_metadata', 'tempdir', 'db_path', 'cursor']
+    __slots__ = ['baseurl', '_metadata', 'tempdir', 'db_path', 'cursor', 'compression_type']
 
     def __init__(self, baseurl, primary_url):
         self.baseurl = baseurl
         self.tempdir = tempfile.TemporaryDirectory()
         self.db_path = os.path.join(self.tempdir.name, 'primary.sqlite')
+        self.compression_type = primary_url.split('.')[-1] if primary_url.split('.')[-1] != 'sqlite' else None
 
-        with urllib.request.urlopen(primary_url) as response:
-            with io.BytesIO(response.read()) as compressed:
-                with gzip.GzipFile(fileobj=compressed) as uncompressed:
-                    with open(self.db_path, 'wb') as f_out:
-                        shutil.copyfileobj(uncompressed, f_out)
+        if self.compression_type:
+            # Download compressed primary.sqlite
+            compressed_path = f"{self.db_path}.{self.compression_type}"
+            with urllib.request.urlopen(primary_url) as response, open(compressed_path, 'wb') as out_file:
+                shutil.copyfileobj(response, out_file)
+            # Decompress primary.sqlite
+            try:
+                uncompress(source_path=compressed_path,
+                           dest_path=self.db_path,
+                           compression_type=self.compression_type)
+            except KeyError:
+                raise ValueError(f'Unknown compression type: {self.compression_type}')
+        else:
+            # Download primary.sqlite
+            with urllib.request.urlopen(primary_url) as response, open(self.db_path, 'wb') as out_file:
+                shutil.copyfileobj(response, out_file)
 
         self.cursor = sqlite3.connect(self.db_path).cursor()
 
